@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, Bell } from 'lucide-react';
 import { useDisasterStore } from '../store/disaster';
+import { parsePointLocation } from '../lib/geo';
 import type { Database } from '../lib/database.types';
 
 type AlertInsert = Database['public']['Tables']['alerts']['Insert'];
@@ -13,7 +14,7 @@ interface AlertModalProps {
 export default function AlertModal({ onClose, disasterId }: AlertModalProps) {
   const { broadcastAlert, disasters } = useDisasterStore();
   const targetDisaster = disasters.find(d => d.id === disasterId);
-  const [lng, lat] = targetDisaster?.location?.coordinates ?? [78.9629, 20.5937];
+  const [lng, lat] = parsePointLocation(targetDisaster?.location) ?? [78.9629, 20.5937];
 
   const [formData, setFormData] = useState<Partial<AlertInsert>>({
     type: 'warning',

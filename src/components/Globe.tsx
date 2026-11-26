@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import createGlobe from "cobe";
 import type { COBEOptions } from "cobe";
 import { useDisasterStore } from '../store/disaster';
+import { parsePointLocation } from '../lib/geo';
 
 const defaultConfig: COBEOptions = {
   width: 1000,
@@ -39,12 +40,16 @@ export function Globe({
 
   // Convert disasters to markers with proper scaling and colors
   const markers = disasters
-    .filter(disaster => disaster.location?.coordinates)
-    .map(disaster => ({
-      location: [disaster.location.coordinates[1], disaster.location.coordinates[0]] as [number, number], // Swap lat/lng for COBE
-      size: Math.max(0.5, Math.min(1.5, disaster.severity * 0.3)), // Scale marker size based on severity
-      color: getDisasterColor(disaster.type),
-    }));
+    .map(disaster => {
+      const coords = parsePointLocation(disaster.location);
+      if (!coords) return null;
+      return {
+        location: [coords[1], coords[0]] as [number, number], // Swap lat/lng for COBE
+        size: Math.max(0.5, Math.min(1.5, disaster.severity * 0.3)),
+        color: getDisasterColor(disaster.type),
+      };
+    })
+    .filter((m): m is NonNullable<typeof m> => m !== null);
 
   function getDisasterColor(type: string): [number, number, number] {
     switch (type) {

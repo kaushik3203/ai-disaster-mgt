@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
-import { Activity, Settings, Bell, HelpCircle, User, LogOut, Shield, Mail, AlertTriangle, Bot } from 'lucide-react';
+import { Activity, Settings, Bell, HelpCircle, User, LogOut, Shield, Mail, AlertTriangle, Bot, Phone } from 'lucide-react';
 import AIChat from './AIChat';
+import AuthModal from './AuthModal';
+import { useAuthStore } from '../store/auth';
 
 interface NotificationItem {
   id: string;
@@ -35,11 +37,13 @@ const mockNotifications: NotificationItem[] = [
 ];
 
 export default function Navbar() {
+  const { user, alertsEnabled, notificationPermission, toggleAlerts, signOut } = useAuthStore();
   const [showNotifications, setShowNotifications] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showChat, setShowChat] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
 
   const renderNotificationsPanel = () => (
     <div className="absolute right-0 mt-2 w-96 bg-white rounded-lg shadow-xl z-50">
@@ -124,33 +128,61 @@ export default function Navbar() {
   );
 
   const renderProfilePanel = () => (
-    <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-xl z-50">
+    <div className="absolute right-0 mt-2 w-72 bg-white rounded-lg shadow-xl z-50">
       <div className="p-4 border-b border-gray-200">
         <div className="flex items-center">
           <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center">
-            <span className="text-white text-lg font-semibold">A</span>
+            <span className="text-white text-lg font-semibold">
+              {user?.phone ? 'U' : 'A'}
+            </span>
           </div>
           <div className="ml-3">
-            <p className="text-sm font-medium text-gray-900">Admin User</p>
-            <p className="text-xs text-gray-500">admin@emergency.gov</p>
+            <p className="text-sm font-medium text-gray-900">
+              {user ? 'Verified User' : 'Guest / Demo'}
+            </p>
+            <p className="text-xs text-gray-500">
+              {user?.phone || user?.email || 'Not signed in'}
+            </p>
           </div>
         </div>
       </div>
-      <div className="p-2">
-        <button className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 rounded-lg">
-          Profile Settings
-        </button>
-        <button className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 rounded-lg">
-          Security
-        </button>
-        <button className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 rounded-lg">
-          Preferences
-        </button>
-        <div className="border-t border-gray-200 mt-2 pt-2">
-          <button className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg flex items-center">
-            <LogOut className="w-4 h-4 mr-2" />
-            Sign Out
-          </button>
+      <div className="p-3 space-y-2">
+        <label className="flex items-center justify-between px-2 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg cursor-pointer">
+          <span>Device Alerts</span>
+          <input
+            type="checkbox"
+            checked={alertsEnabled}
+            onChange={(e) => toggleAlerts(e.target.checked)}
+            className="rounded border-gray-300 text-blue-600"
+          />
+        </label>
+        <p className="px-2 text-xs text-gray-500">
+          Browser permission: <span className="font-medium">{notificationPermission}</span>
+        </p>
+        <div className="border-t border-gray-200 pt-2">
+          {user ? (
+            <button
+              onClick={async () => {
+                await signOut();
+                setShowProfile(false);
+              }}
+              className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg flex items-center"
+            >
+              <LogOut className="w-4 h-4 mr-2" />
+              Sign Out
+            </button>
+          ) : (
+            <button
+              onClick={() => {
+                setShowProfile(false);
+                setShowAuthModal(true);
+              }}
+              className="w-full text-left px-3 py-2 text-sm text-blue-600 hover:bg-blue-50 rounded-lg flex items-center"
+            >
+              <Phone className="w-4 h-4 mr-2" />
+              Login with Phone
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -215,18 +247,29 @@ export default function Navbar() {
             <div className="w-px h-6 bg-white/20"></div>
 
             <div className="relative">
-              <button 
-                className="flex items-center space-x-2 px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
-                onClick={() => setShowProfile(!showProfile)}
-              >
-                <User className="w-5 h-5 text-blue-400" />
-                <span className="text-sm text-white">Admin</span>
-              </button>
+              {user ? (
+                <button
+                  className="flex items-center space-x-2 px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
+                  onClick={() => setShowProfile(!showProfile)}
+                >
+                  <User className="w-5 h-5 text-blue-400" />
+                  <span className="text-sm text-white">{user.phone || 'Account'}</span>
+                </button>
+              ) : (
+                <button
+                  className="flex items-center space-x-2 px-3 py-2 rounded-lg bg-blue-600/80 hover:bg-blue-600 transition-colors"
+                  onClick={() => setShowAuthModal(true)}
+                >
+                  <Phone className="w-4 h-4 text-white" />
+                  <span className="text-sm text-white font-medium">Phone Login</span>
+                </button>
+              )}
               {showProfile && renderProfilePanel()}
             </div>
           </div>
         </div>
       </div>
+      {showAuthModal && <AuthModal onClose={() => setShowAuthModal(false)} />}
     </nav>
   );
 }
