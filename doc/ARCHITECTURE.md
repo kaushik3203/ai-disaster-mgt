@@ -197,5 +197,4 @@ All AI features use `@google/generative-ai` with the `gemini-pro` model:
 3. **RLS Policies**:
    - Current demo migrations allow public `ALL` access on all tables. Production deployments should restrict write/update operations to authenticated roles.
 
-Supabase :ai-disaster-mgt
-Pass: Aidisaster!@#2026
+

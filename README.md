@@ -51,10 +51,6 @@ This project is an **AI-powered Disaster Management System** designed to address
 - **Linting & Code Quality:** ESLint, TypeScript ESLint
 
 ## 📌 Installation & Setup
-Clone the repository:
-```bash
-  git clone https://github.com/kaushik3203/ai-disaster-mgt.git
-```
 
 Install dependencies:
 ```bash
