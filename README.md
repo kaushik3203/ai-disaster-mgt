@@ -2,14 +2,6 @@
 
 ### 🚀 A Scalable, AI-driven Solution for Real-Time Disaster Response & Ressource Management
 
-![Banner](https://files.oaiusercontent.com/file-2DG2AecJUWPxnwLHKrxanU?se=2025-03-17T16%3A46%3A43Z&sp=r&sv=2024-08-04&sr=b&rscc=max-age%3D604800%2C%20immutable%2C%20private&rscd=attachment%3B%20filename%3D8b05450c-59b1-408e-ae74-0c578fe3ce0b.webp&sig=PHKMVDRSHRR9WrPZQO/0v9PCJql4cCJH6AYRTkezpm8%3D)
-
-## 🔗 Live Preview
-👉 [Explore the MVP](https://zingy-naiad-ee539d.netlify.app/)
-
-## 📌 Repository
-🔗 [GitHub Repo](https://github.com/LittleCodr/solutions-challenge-disastster-managements.git)
-
 ## 📖 Overview
 This project is an **AI-powered Disaster Management System** designed to address the challenges of disaster response, resource allocation, and real-time alerts. It leverages **Google Gemini AI, geospatial visualization, and real-time data** to provide efficient disaster predictions, resource tracking, and automated communication.
 
@@ -61,7 +53,7 @@ This project is an **AI-powered Disaster Management System** designed to address
 ## 📌 Installation & Setup
 Clone the repository:
 ```bash
-  git clone https://github.com/LittleCodr/solutions-challenge-disastster-managements.git
+  git clone https://github.com/kaushik3203/ai-disaster-mgt.git
 ```
 
 Install dependencies:
@@ -80,13 +72,3 @@ Run the development server:
 - **Integration with government disaster response APIs**
 - **Edge computing for low-connectivity regions**
 
-## 🤝 Contributing
-Contributions are welcome! Please open an issue or submit a pull request. 🙌
-
-## 📢 Connect with Me
-🔗 **GitHub:** [LittleCodr](https://github.com/LittleCodr)  
-🔗 **LinkedIn:** [mindflayer_69](https://linkedin.com/in/littlecodr)  
-🔗 **Twitter:** [mindflayer_69](https://twitter.com/mindflayer_69)  
-
----
-### 🏆 Made with ❤️ by [Mayank Agrawal](https://github.com/LittleCodr)

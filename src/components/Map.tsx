@@ -18,8 +18,7 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 type Disaster = Database['public']['Tables']['disasters']['Row'];
 type Resource = Database['public']['Tables']['resources']['Row'];
 
-// Replace with a valid Mapbox token
-const MAPBOX_TOKEN = 'pk.eyJ1IjoiZGlzYXN0ZXJodWIiLCJhIjoiY2xxNXkyczBpMDFtaDJrcnZqZzF1Z2l4NyJ9.4j-aiq4kejQPRzGmeQDCX9KKANipVbgf1XBfWrEc9Zw';
+const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
 
 const RESOURCE_ICONS = {
   medical: Shield,
@@ -263,11 +262,6 @@ export default function DisasterMap({ onDisasterSelect }: DisasterMapProps) {
       mapStyle={MAP_STYLE}
       mapboxAccessToken={MAPBOX_TOKEN}
       attributionControl={false}
-      initialViewState={{
-        longitude: 78.9629,
-        latitude: 20.5937,
-        zoom: 4
-      }}
     >
       <GeolocateControl 
         position="top-right"
@@ -324,8 +318,8 @@ export default function DisasterMap({ onDisasterSelect }: DisasterMapProps) {
           id="flooded-areas-fill"
           type="fill"
           paint={{
-            'fill-color': 'rgba(0, 0, 255, 0.2)',
-            'fill-pattern': 'water'
+            'fill-color': 'rgba(0, 119, 255, 0.25)',
+            'fill-outline-color': '#3b82f6'
           }}
         />
       </Source>

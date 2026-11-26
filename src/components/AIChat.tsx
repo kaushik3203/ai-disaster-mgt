@@ -53,19 +53,6 @@ export default function AIChat({ onClose }: AIChatProps) {
     scrollToBottom();
   }, [messages]);
 
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (chatRef.current && !chatRef.current.contains(event.target as Node)) {
-        setIsMinimized(true);
-      }
-    }
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, []);
-
   const handleSend = async (promptText: string = input) => {
     if (!promptText.trim() && !input.trim()) return;
 
@@ -211,7 +198,7 @@ export default function AIChat({ onClose }: AIChatProps) {
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleSend()}
+            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
             placeholder="Ask me anything about the current situation..."
             className="flex-1 bg-black/20 text-white rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500/50 text-sm sm:text-base"
           />

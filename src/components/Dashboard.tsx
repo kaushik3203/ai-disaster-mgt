@@ -1,15 +1,17 @@
-import React, { useState, useEffect } from 'react';
-import { AlertTriangle, Activity, Users, Box, Bell, Map as MapIcon, BarChart, Plus, Bot } from 'lucide-react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
+import { AlertTriangle, Users, Box, Bell, Plus, Bot } from 'lucide-react';
 import { useDisasterStore } from '../store/disaster';
-import Map from './Map';
-import Analytics from './Analytics';
 import ReportIncident from './ReportIncident';
 import ResourceModal from './ResourceModal';
 import AlertModal from './AlertModal';
-import AIChat from './AIChat';
-import { Globe } from './Globe';
 import Dock from './Dock';
 import { format } from 'date-fns';
+
+const Map = lazy(() => import('./Map'));
+const Analytics = lazy(() => import('./Analytics'));
+const AIAnalysis = lazy(() => import('./AIAnalysis'));
+const AIChat = lazy(() => import('./AIChat'));
+const Globe = lazy(() => import('./Globe').then(m => ({ default: m.Globe })));
 
 const StatCard = ({ icon: Icon, label, value, color }: { 
   icon: React.ElementType, 
@@ -54,7 +56,7 @@ export default function Dashboard() {
     fetchInitialData();
     subscribeToUpdates();
     return () => unsubscribeFromUpdates();
-  }, []);
+  }, [fetchInitialData, subscribeToUpdates, unsubscribeFromUpdates]);
 
   if (loading) {
     return (
@@ -78,22 +80,51 @@ export default function Dashboard() {
   const activeDisasters = disasters.filter(d => d.status === 'active').length;
   const availableTeams = teams.filter(t => t.status === 'available').length;
   const deployedResources = resources.filter(r => r.status === 'deployed').length;
-  const activeAlerts = alerts.filter(a => a.status === 'sent').length;
 
   const renderContent = () => {
+    const viewFallback = (
+      <div className="w-full h-full flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+      </div>
+    );
+
     switch (activeView) {
       case 'map':
-        return <Map onDisasterSelect={setSelectedDisaster} />;
+        return (
+          <Suspense fallback={viewFallback}>
+            <Map onDisasterSelect={setSelectedDisaster} />
+          </Suspense>
+        );
       case 'globe':
         return (
           <div className="relative w-full h-full flex items-center justify-center">
-            <Globe />
+            <Suspense fallback={viewFallback}>
+              <Globe />
+            </Suspense>
           </div>
         );
       case 'analytics':
-        return <Analytics />;
+        return (
+          <div className="p-6 h-full overflow-y-auto">
+            <Suspense fallback={viewFallback}>
+              <Analytics />
+            </Suspense>
+          </div>
+        );
+      case 'analysis':
+        return (
+          <div className="p-6 h-full overflow-y-auto">
+            <Suspense fallback={viewFallback}>
+              <AIAnalysis />
+            </Suspense>
+          </div>
+        );
       default:
-        return <Map onDisasterSelect={setSelectedDisaster} />;
+        return (
+          <Suspense fallback={viewFallback}>
+            <Map onDisasterSelect={setSelectedDisaster} />
+          </Suspense>
+        );
     }
   };
 
@@ -276,12 +307,14 @@ export default function Dashboard() {
       )}
 
       {showAlertModal && (
-        <AlertModal onClose={() => setShowAlertModal(false)} disasterId={selectedDisaster} />
+        <AlertModal onClose={() => setShowAlertModal(false)} disasterId={selectedDisaster ?? undefined} />
       )}
 
       {showChat && (
         <div className="fixed bottom-32 right-8 w-96 z-50 shadow-2xl">
-          <AIChat onClose={() => setShowChat(false)} />
+          <Suspense fallback={null}>
+            <AIChat onClose={() => setShowChat(false)} />
+          </Suspense>
         </div>
       )}
     </div>

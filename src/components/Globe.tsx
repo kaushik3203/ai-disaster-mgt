@@ -29,8 +29,8 @@ export function Globe({
   config?: COBEOptions;
 }) {
   const { disasters } = useDisasterStore();
-  let phi = 0;
-  let width = 0;
+  const phiRef = useRef(0);
+  const widthRef = useRef(0);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pointerInteracting = useRef<number | null>(null);
   const pointerInteractionMovement = useRef(0);
@@ -41,13 +41,12 @@ export function Globe({
   const markers = disasters
     .filter(disaster => disaster.location?.coordinates)
     .map(disaster => ({
-      location: [disaster.location.coordinates[1], disaster.location.coordinates[0]], // Swap lat/lng for COBE
+      location: [disaster.location.coordinates[1], disaster.location.coordinates[0]] as [number, number], // Swap lat/lng for COBE
       size: Math.max(0.5, Math.min(1.5, disaster.severity * 0.3)), // Scale marker size based on severity
-      color: getDisasterColor(disaster.type, disaster.severity),
+      color: getDisasterColor(disaster.type),
     }));
 
-  function getDisasterColor(type: string, severity: number): [number, number, number] {
-    const alpha = 0.5 + (severity * 0.1); // Intensity based on severity
+  function getDisasterColor(type: string): [number, number, number] {
     switch (type) {
       case 'earthquake':
         return [1, 0.3, 0.2]; // Red
@@ -81,20 +80,20 @@ export function Globe({
     }
   };
 
-  const onResize = () => {
+  const onResize = useCallback(() => {
     if (canvasRef.current) {
-      width = canvasRef.current.offsetWidth;
+      widthRef.current = canvasRef.current.offsetWidth;
     }
-  };
+  }, []);
 
   const onRender = useCallback(
-    (state: Record<string, any>) => {
+    (state: Record<string, unknown>) => {
       if (!pointerInteracting.current) {
-        phi += 0.005;
+        phiRef.current += 0.005;
       }
-      state.phi = phi + rotation;
-      state.width = width * 2;
-      state.height = width * 2;
+      state.phi = phiRef.current + rotation;
+      state.width = widthRef.current * 2;
+      state.height = widthRef.current * 2;
     },
     [rotation],
   );
@@ -105,11 +104,11 @@ export function Globe({
     window.addEventListener("resize", onResize);
     onResize();
 
-    const globeConfig = {
+    const globeConfig: COBEOptions = {
       ...defaultConfig,
       ...config,
-      width: width * 2,
-      height: width * 2,
+      width: widthRef.current * 2,
+      height: widthRef.current * 2,
       onRender,
       markers,
     };
@@ -117,7 +116,7 @@ export function Globe({
     const globe = createGlobe(canvasRef.current, globeConfig);
 
     // Add loading animation
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       if (canvasRef.current) {
         canvasRef.current.style.opacity = "1";
         setIsLoading(false);
@@ -125,10 +124,11 @@ export function Globe({
     }, 500);
 
     return () => {
+      clearTimeout(timer);
       window.removeEventListener("resize", onResize);
       globe.destroy();
     };
-  }, [disasters, width]);
+  }, [config, markers, onRender, onResize]);
 
   return (
     <div className={`relative w-full h-full flex items-center justify-center ${className}`}>
@@ -162,7 +162,7 @@ export function Globe({
               <div 
                 className="w-3 h-3 rounded-full" 
                 style={{ 
-                  backgroundColor: `rgb(${getDisasterColor(type, 5).map(c => c * 255).join(',')})` 
+                  backgroundColor: `rgb(${getDisasterColor(type).map(c => c * 255).join(',')})` 
                 }}
               />
               <span className="capitalize">{type}</span>

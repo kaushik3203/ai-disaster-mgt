@@ -32,8 +32,14 @@ export default function ResourceModal({ onClose }: ResourceModalProps) {
     setError(null);
     
     try {
-      if (!formData.location?.coordinates[0] || !formData.location?.coordinates[1]) {
-        throw new Error('Please provide valid coordinates');
+      const lng = formData.location?.coordinates[0];
+      const lat = formData.location?.coordinates[1];
+      if (
+        typeof lng !== 'number' || typeof lat !== 'number' ||
+        !Number.isFinite(lng) || !Number.isFinite(lat) ||
+        lng < -180 || lng > 180 || lat < -90 || lat > 90
+      ) {
+        throw new Error('Please provide valid coordinates (lng: -180..180, lat: -90..90)');
       }
 
       await createResource(formData as ResourceInsert);

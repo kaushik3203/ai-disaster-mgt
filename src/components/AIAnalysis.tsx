@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Brain, AlertTriangle, FileText, Shield } from 'lucide-react';
+import { Brain, FileText, Shield } from 'lucide-react';
 import { analyzeSeverity, predictResourceNeeds, detectMisinformation, generateSituationReport } from '../lib/gemini';
 import { useDisasterStore } from '../store/disaster';
 
@@ -143,10 +143,29 @@ export default function AIAnalysis() {
             </div>
           ) : (
             <div className="space-y-4">
-              {analysis.misinformation && (
+              {analysis.misinformation ? (
                 <div className="glass-dark p-4 rounded-lg">
                   <h3 className="text-lg font-medium text-white mb-2">Report Analysis</h3>
                   <p className="text-gray-300 text-sm whitespace-pre-line">{analysis.misinformation}</p>
+                </div>
+              ) : (
+                <p className="text-sm text-gray-400">
+                  {reports.length > 0
+                    ? 'Select a report below to verify credibility.'
+                    : 'No incident reports submitted yet.'}
+                </p>
+              )}
+              {reports.length > 0 && (
+                <div className="flex flex-wrap gap-2 pt-2">
+                  {reports.slice(0, 5).map(report => (
+                    <button
+                      key={report.id}
+                      onClick={() => handleCheckMisinformation(report.id)}
+                      className="px-3 py-1.5 bg-green-500/20 hover:bg-green-500/30 text-green-300 rounded-lg text-xs transition-all"
+                    >
+                      Verify: {report.title}
+                    </button>
+                  ))}
                 </div>
               )}
             </div>

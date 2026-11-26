@@ -1,6 +1,48 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import type { Database } from "./database.types";
 
-const genAI = new GoogleGenerativeAI("AIzaSyAboW17yA9ihXLNqnpK6bn-cK6roxqvH2M");
+type Disaster = Database["public"]["Tables"]["disasters"]["Row"];
+type Resource = Database["public"]["Tables"]["resources"]["Row"];
+type Team = Database["public"]["Tables"]["teams"]["Row"];
+type Alert = Database["public"]["Tables"]["alerts"]["Row"];
+
+const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+const GEMINI_MODEL = "gemini-3-flash-preview";
+
+const genAI = {
+  getGenerativeModel({ model }: { model: string }) {
+    return {
+      async generateContent(prompt: string) {
+        if (!apiKey) {
+          throw new Error("Missing VITE_GEMINI_API_KEY in environment.");
+        }
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt }] }],
+            }),
+          }
+        );
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`Gemini API ${res.status}: ${errText}`);
+        }
+        const data = await res.json();
+        const text =
+          data?.candidates?.[0]?.content?.parts
+            ?.map((p: { text?: string }) => p.text ?? "")
+            .join("") ?? "";
+        return {
+          response: {
+            text: () => text,
+          },
+        };
+      },
+    };
+  },
+};
 
 export async function generateChatResponse({
   prompt,
@@ -8,14 +50,14 @@ export async function generateChatResponse({
 }: {
   prompt: string;
   context: {
-    disasters: any[];
-    resources: any[];
-    teams: any[];
-    alerts: any[];
+    disasters: Disaster[];
+    resources: Resource[];
+    teams: Team[];
+    alerts: Alert[];
   };
 }) {
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
 
     const formattedContext = `
       You are an AI assistant for a disaster management system. Current situation:
@@ -72,7 +114,7 @@ export async function analyzeSeverity(disasterData: {
   location: string;
   affectedPopulation?: number;
 }) {
-  const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
 
   const prompt = `
     Analyze this disaster situation and provide:
@@ -99,7 +141,7 @@ export async function predictResourceNeeds(disasterData: {
   affectedPopulation?: number;
   location: string;
 }) {
-  const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
 
   const prompt = `
     Based on this disaster scenario, predict and suggest:
@@ -126,7 +168,7 @@ export async function detectMisinformation(report: {
   description: string;
   source?: string;
 }) {
-  const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
 
   const prompt = `
     Analyze this disaster report for potential misinformation:
@@ -151,7 +193,7 @@ export async function generateSituationReport(data: {
   location: string;
   timeframe: string;
 }) {
-  const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
 
   const prompt = `
     Generate a comprehensive situation report based on these incidents:

@@ -28,16 +28,18 @@ ChartJS.register(
 );
 
 export default function Analytics() {
-  const { disasters, reports, resources } = useDisasterStore();
+  const { disasters, resources } = useDisasterStore();
+
+  const sortedDisasters = [...disasters].sort(
+    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+  );
 
   const disasterTrends = {
-    labels: disasters
-      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
-      .map(d => format(new Date(d.created_at), 'MMM d')),
+    labels: sortedDisasters.map(d => format(new Date(d.created_at), 'MMM d')),
     datasets: [
       {
         label: 'Active Disasters',
-        data: disasters.map(d => d.severity),
+        data: sortedDisasters.map(d => d.severity),
         borderColor: 'rgb(255, 99, 132)',
         backgroundColor: 'rgba(255, 99, 132, 0.5)',
         fill: true,

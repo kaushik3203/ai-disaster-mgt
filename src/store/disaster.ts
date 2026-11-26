@@ -1,6 +1,28 @@
 import { create } from 'zustand';
+import type { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import type { Database } from '../lib/database.types';
+
+let activeChannels: RealtimeChannel[] = [];
+
+function applyRealtimePayload<T extends { id: string }>(
+  items: T[],
+  payload: RealtimePostgresChangesPayload<T>
+): T[] {
+  if (payload.eventType === 'INSERT') {
+    const next = payload.new as T;
+    return items.some(item => item.id === next.id) ? items : [...items, next];
+  }
+  if (payload.eventType === 'UPDATE') {
+    const next = payload.new as T;
+    return items.map(item => (item.id === next.id ? { ...item, ...next } : item));
+  }
+  if (payload.eventType === 'DELETE') {
+    const oldId = (payload.old as Partial<T>).id;
+    return oldId ? items.filter(item => item.id !== oldId) : items;
+  }
+  return items;
+}
 
 type Disaster = Database['public']['Tables']['disasters']['Row'];
 type Resource = Database['public']['Tables']['resources']['Row'];
@@ -228,81 +250,45 @@ export const useDisasterStore = create<DisasterStore>((set, get) => ({
   error: null,
 
   subscribeToUpdates: () => {
-    const channels = [
+    if (activeChannels.length > 0) {
+      activeChannels.forEach(channel => supabase.removeChannel(channel));
+      activeChannels = [];
+    }
+
+    activeChannels = [
       supabase
-        .channel('disasters')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'disasters' }, 
-          payload => {
-            const { disasters } = get();
-            if (payload.eventType === 'INSERT') {
-              set({ disasters: [...disasters, payload.new as Disaster] });
-            } else if (payload.eventType === 'UPDATE') {
-              set({
-                disasters: disasters.map(d => 
-                  d.id === payload.new.id ? { ...d, ...payload.new } : d
-                )
-              });
-            }
-          }
+        .channel('disasters-changes')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'disasters' },
+          payload => set({ disasters: applyRealtimePayload(get().disasters, payload as RealtimePostgresChangesPayload<Disaster>) })
         ),
       supabase
-        .channel('resources')
+        .channel('resources-changes')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'resources' },
-          payload => {
-            const { resources } = get();
-            if (payload.eventType === 'INSERT') {
-              set({ resources: [...resources, payload.new as Resource] });
-            } else if (payload.eventType === 'UPDATE') {
-              set({
-                resources: resources.map(r => 
-                  r.id === payload.new.id ? { ...r, ...payload.new } : r
-                )
-              });
-            }
-          }
+          payload => set({ resources: applyRealtimePayload(get().resources, payload as RealtimePostgresChangesPayload<Resource>) })
         ),
       supabase
-        .channel('teams')
+        .channel('teams-changes')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' },
-          payload => {
-            const { teams } = get();
-            if (payload.eventType === 'INSERT') {
-              set({ teams: [...teams, payload.new as Team] });
-            } else if (payload.eventType === 'UPDATE') {
-              set({
-                teams: teams.map(t => 
-                  t.id === payload.new.id ? { ...t, ...payload.new } : t
-                )
-              });
-            }
-          }
+          payload => set({ teams: applyRealtimePayload(get().teams, payload as RealtimePostgresChangesPayload<Team>) })
         ),
       supabase
-        .channel('alerts')
+        .channel('reports-changes')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' },
+          payload => set({ reports: applyRealtimePayload(get().reports, payload as RealtimePostgresChangesPayload<Report>) })
+        ),
+      supabase
+        .channel('alerts-changes')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'alerts' },
-          payload => {
-            const { alerts } = get();
-            if (payload.eventType === 'INSERT') {
-              set({ alerts: [...alerts, payload.new as Alert] });
-            } else if (payload.eventType === 'UPDATE') {
-              set({
-                alerts: alerts.map(a => 
-                  a.id === payload.new.id ? { ...a, ...payload.new } : a
-                )
-              });
-            }
-          }
+          payload => set({ alerts: applyRealtimePayload(get().alerts, payload as RealtimePostgresChangesPayload<Alert>) })
         )
     ];
 
-    channels.forEach(channel => channel.subscribe());
+    activeChannels.forEach(channel => channel.subscribe());
   },
 
   unsubscribeFromUpdates: () => {
-    supabase.channel('disasters').unsubscribe();
-    supabase.channel('resources').unsubscribe();
-    supabase.channel('teams').unsubscribe();
-    supabase.channel('alerts').unsubscribe();
+    activeChannels.forEach(channel => supabase.removeChannel(channel));
+    activeChannels = [];
   },
 
   fetchInitialData: async () => {
@@ -315,11 +301,11 @@ export const useDisasterStore = create<DisasterStore>((set, get) => ({
         { data: reports, error: reportsError },
         { data: alerts, error: alertsError }
       ] = await Promise.all([
-        supabase.from('disasters').select('*'),
-        supabase.from('resources').select('*'),
-        supabase.from('teams').select('*'),
-        supabase.from('reports').select('*'),
-        supabase.from('alerts').select('*')
+        supabase.from('disasters').select('*').order('created_at', { ascending: false }).limit(100),
+        supabase.from('resources').select('*').order('created_at', { ascending: false }).limit(100),
+        supabase.from('teams').select('*').order('created_at', { ascending: false }).limit(100),
+        supabase.from('reports').select('*').order('created_at', { ascending: false }).limit(100),
+        supabase.from('alerts').select('*').order('created_at', { ascending: false }).limit(100)
       ]);
 
       if (disastersError) throw disastersError;

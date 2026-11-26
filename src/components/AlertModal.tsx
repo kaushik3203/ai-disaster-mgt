@@ -11,22 +11,25 @@ interface AlertModalProps {
 }
 
 export default function AlertModal({ onClose, disasterId }: AlertModalProps) {
-  const { broadcastAlert } = useDisasterStore();
+  const { broadcastAlert, disasters } = useDisasterStore();
+  const targetDisaster = disasters.find(d => d.id === disasterId);
+  const [lng, lat] = targetDisaster?.location?.coordinates ?? [78.9629, 20.5937];
+
   const [formData, setFormData] = useState<Partial<AlertInsert>>({
     type: 'warning',
     title: '',
     message: '',
-    severity: 3,
+    severity: targetDisaster?.severity ?? 3,
     channels: ['sms', 'email', 'app'],
     status: 'draft',
     affected_area: {
       type: 'Polygon',
       coordinates: [[
-        [-122.33, 47.61],
-        [-122.33, 47.62],
-        [-122.32, 47.62],
-        [-122.32, 47.61],
-        [-122.33, 47.61]
+        [lng - 0.1, lat - 0.1],
+        [lng + 0.1, lat - 0.1],
+        [lng + 0.1, lat + 0.1],
+        [lng - 0.1, lat + 0.1],
+        [lng - 0.1, lat - 0.1]
       ]]
     },
     disaster_id: disasterId
