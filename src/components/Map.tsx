@@ -10,11 +10,13 @@ import Map, {
   MapRef,
   GeolocateControl
 } from 'react-map-gl';
-import { AlertTriangle, Users, Box, Truck, Shield, Wind, Layers, Waves, Droplets, Gauge, Thermometer, X, Play, Pause, SkipBack, SkipForward } from 'lucide-react';
+import { AlertTriangle, Users, Box, Truck, Shield, Wind, Layers, Waves, Droplets, Gauge, Thermometer, X, Play, Pause, SkipBack, SkipForward, Sparkles, Clock, Navigation } from 'lucide-react';
 import { useDisasterStore } from '../store/disaster';
 import { parsePointLocation, createCirclePolygon } from '../lib/geo';
 import { fetchLiveWeather, fetchRainViewerFrames, type LiveWeather, type RadarFrame } from '../lib/liveDisasters';
+import { predictDisasterTrajectory, type DisasterAIForecast } from '../lib/gemini';
 import type { Database } from '../lib/database.types';
+import type { StyleSpecification } from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 
 type Disaster = Database['public']['Tables']['disasters']['Row'];
@@ -31,12 +33,67 @@ const RESOURCE_ICONS = {
   transport: Truck
 };
 
-const MAP_STYLES = [
-  { id: 'streets', label: 'Streets', url: 'mapbox://styles/mapbox/streets-v12' },
-  { id: 'satellite', label: 'Satellite', url: 'mapbox://styles/mapbox/satellite-streets-v12' },
-  { id: 'outdoors', label: 'Terrain', url: 'mapbox://styles/mapbox/outdoors-v12' },
-  { id: 'dark', label: 'Dark', url: 'mapbox://styles/mapbox/dark-v11' },
-] as const;
+function createRasterStyle(tiles: string[], labelTiles?: string[]): StyleSpecification {
+  const sources: StyleSpecification['sources'] = {
+    base: {
+      type: 'raster',
+      tiles,
+      tileSize: 256,
+    },
+  };
+  const layers: StyleSpecification['layers'] = [
+    {
+      id: 'base-layer',
+      type: 'raster',
+      source: 'base',
+    },
+  ];
+
+  if (labelTiles) {
+    sources.labels = {
+      type: 'raster',
+      tiles: labelTiles,
+      tileSize: 256,
+    };
+    layers.push({
+      id: 'labels-layer',
+      type: 'raster',
+      source: 'labels',
+    });
+  }
+
+  return {
+    version: 8,
+    sources,
+    layers,
+  };
+}
+
+const MAP_STYLES: Array<{ id: string; label: string; style: StyleSpecification }> = [
+  {
+    id: 'satellite',
+    label: 'Satellite',
+    style: createRasterStyle(
+      ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+      ['https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}']
+    ),
+  },
+  {
+    id: 'streets',
+    label: 'Streets',
+    style: createRasterStyle(['https://tile.openstreetmap.org/{z}/{x}/{y}.png']),
+  },
+  {
+    id: 'terrain',
+    label: 'Terrain',
+    style: createRasterStyle(['https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}']),
+  },
+  {
+    id: 'dark',
+    label: 'Dark',
+    style: createRasterStyle(['https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}']),
+  },
+];
 
 const DISASTER_FILTERS = [
   { id: 'all', label: 'All', emoji: '🌍' },
@@ -75,9 +132,14 @@ export default function DisasterMap({ onDisasterSelect }: DisasterMapProps) {
   const [popupInfo, setPopupInfo] = useState<Disaster | null>(null);
   const [liveWeather, setLiveWeather] = useState<LiveWeather | null>(null);
   const [weatherLoading, setWeatherLoading] = useState(false);
+  const [aiForecast, setAiForecast] = useState<DisasterAIForecast | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [detailTab, setDetailTab] = useState<'current' | 'ai'>('current');
+  const activeDisasterIdRef = useRef<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<string>('all');
   const [selectedResource, setSelectedResource] = useState<Resource | null>(null);
-  const [mapStyle, setMapStyle] = useState<string>(MAP_STYLES[1].url);
+  const [activeStyleId, setActiveStyleId] = useState<string>('satellite');
   const [radarFrames, setRadarFrames] = useState<RadarFrame[]>([]);
   const [radarIndex, setRadarIndex] = useState(0);
   const [isPlayingRadar, setIsPlayingRadar] = useState(false);
@@ -102,8 +164,11 @@ export default function DisasterMap({ onDisasterSelect }: DisasterMapProps) {
 
   useEffect(() => {
     if (popupInfo && !matchesFilter(popupInfo, activeFilter)) {
+      activeDisasterIdRef.current = null;
       setPopupInfo(null);
       setLiveWeather(null);
+      setAiForecast(null);
+      setAiError(null);
     }
     if (activeFilter !== 'all') {
       setSelectedResource(null);
@@ -233,6 +298,75 @@ export default function DisasterMap({ onDisasterSelect }: DisasterMapProps) {
       .filter((f): f is NonNullable<typeof f> => f !== null),
   };
 
+  const handleDisasterClick = async (disaster: Disaster, longitude: number, latitude: number) => {
+    activeDisasterIdRef.current = disaster.id;
+    setPopupInfo(disaster);
+    setLiveWeather(null);
+    setWeatherLoading(true);
+    setAiForecast(null);
+    setAiError(null);
+    setAiLoading(true);
+    onDisasterSelect?.(disaster.id);
+
+    let weatherData: LiveWeather | null = null;
+    try {
+      weatherData = await fetchLiveWeather(latitude, longitude);
+      if (activeDisasterIdRef.current === disaster.id) {
+        setLiveWeather(weatherData);
+      }
+    } finally {
+      if (activeDisasterIdRef.current === disaster.id) {
+        setWeatherLoading(false);
+      }
+    }
+
+    try {
+      const forecast = await predictDisasterTrajectory({
+        id: disaster.id,
+        type: disaster.type,
+        title: disaster.title,
+        locationName: disaster.location_name,
+        lat: latitude,
+        lng: longitude,
+        severity: disaster.severity,
+        radiusKm: disaster.affected_radius_km || 25,
+        description: disaster.description,
+        weather: weatherData,
+      });
+      if (activeDisasterIdRef.current === disaster.id) {
+        setAiForecast(forecast);
+      }
+    } catch (err) {
+      if (activeDisasterIdRef.current === disaster.id) {
+        setAiError(err instanceof Error ? err.message : 'AI forecast unavailable');
+      }
+    } finally {
+      if (activeDisasterIdRef.current === disaster.id) {
+        setAiLoading(false);
+      }
+    }
+  };
+
+  const predictedPathGeoJSON = (() => {
+    const origin = popupInfo ? parsePointLocation(popupInfo.location) : null;
+    if (!origin || !aiForecast || aiForecast.timeline.length === 0) {
+      return { type: 'FeatureCollection' as const, features: [] };
+    }
+    return {
+      type: 'FeatureCollection' as const,
+      features: [
+        {
+          type: 'Feature' as const,
+          properties: { id: popupInfo?.id },
+          geometry: {
+            type: 'LineString' as const,
+            coordinates: [origin, ...aiForecast.timeline.map(wp => [wp.lng, wp.lat] as [number, number])],
+          },
+        },
+      ],
+    };
+  })();
+
   const renderDisasterMarkers = () => {
     return filteredDisasters.map(disaster => {
       const coords = parsePointLocation(disaster.location);
@@ -246,13 +380,7 @@ export default function DisasterMap({ onDisasterSelect }: DisasterMapProps) {
             latitude={latitude}
             onClick={e => {
               e.originalEvent.stopPropagation();
-              setPopupInfo(disaster);
-              setLiveWeather(null);
-              setWeatherLoading(true);
-              fetchLiveWeather(latitude, longitude)
-                .then(setLiveWeather)
-                .finally(() => setWeatherLoading(false));
-              onDisasterSelect?.(disaster.id);
+              handleDisasterClick(disaster, longitude, latitude);
             }}
           >
             <div className="relative cursor-pointer transform hover:scale-110 transition-transform marker-pulse">
@@ -329,9 +457,9 @@ export default function DisasterMap({ onDisasterSelect }: DisasterMapProps) {
             {MAP_STYLES.map(style => (
               <button
                 key={style.id}
-                onClick={() => setMapStyle(style.url)}
+                onClick={() => setActiveStyleId(style.id)}
                 className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
-                  mapStyle === style.url
+                  activeStyleId === style.id
                     ? 'bg-blue-600 text-white'
                     : 'text-gray-200 hover:bg-white/10'
                 }`}
@@ -425,10 +553,10 @@ export default function DisasterMap({ onDisasterSelect }: DisasterMapProps) {
         <span className="flex items-center space-x-1"><span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block" /><span>Low</span></span>
       </div>
 
-      {/* Graphical Non-Tech Friendly Disaster Telemetry Card */}
+      {/* Graphical Non-Tech Friendly Disaster Telemetry + AI Forecast Card */}
       {popupInfo && (
-        <div className="absolute bottom-3 left-3 z-20 w-80 sm:w-96 bg-slate-900/95 backdrop-blur-md border border-white/20 rounded-xl shadow-2xl p-4 text-white">
-          <div className="flex items-start justify-between gap-2 mb-2">
+        <div className="absolute bottom-3 left-3 z-20 w-80 sm:w-96 max-h-[75%] overflow-y-auto bg-slate-900/95 border border-white/20 rounded-xl shadow-2xl p-4 text-white">
+          <div className="flex items-start justify-between gap-2 mb-2.5">
             <div>
               <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold border mb-1 ${getRiskLabel(popupInfo.severity).cls}`}>
                 {getRiskLabel(popupInfo.severity).text}
@@ -443,7 +571,11 @@ export default function DisasterMap({ onDisasterSelect }: DisasterMapProps) {
               </p>
             </div>
             <button
-              onClick={() => setPopupInfo(null)}
+              onClick={() => {
+                activeDisasterIdRef.current = null;
+                setPopupInfo(null);
+                setAiForecast(null);
+              }}
               className="text-gray-400 hover:text-white p-1"
               aria-label="Close disaster details"
             >
@@ -451,87 +583,182 @@ export default function DisasterMap({ onDisasterSelect }: DisasterMapProps) {
             </button>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 text-xs bg-white/5 rounded-lg p-2.5 mb-3">
-            <div>
-              <span className="text-gray-400 block">Impact Zone</span>
-              <span className="font-semibold text-white">{popupInfo.affected_radius_km} km radius</span>
-            </div>
-            <div>
-              <span className="text-gray-400 block">Frequency (Active)</span>
-              <span className="font-semibold text-white flex items-center space-x-1">
-                <Gauge className="w-3.5 h-3.5 text-purple-400" />
-                <span>{disasters.filter(d => d.type === popupInfo.type).length} {popupInfo.type}(s)</span>
-              </span>
-            </div>
+          {/* Current vs AI Prediction Tabs */}
+          <div className="grid grid-cols-2 gap-1 bg-black/30 p-1 rounded-lg border border-white/10 mb-3 text-xs font-medium">
+            <button
+              type="button"
+              onClick={() => setDetailTab('current')}
+              className={`py-1.5 rounded-md transition-colors ${
+                detailTab === 'current' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:text-white'
+              }`}
+            >
+              📊 Current Live
+            </button>
+            <button
+              type="button"
+              onClick={() => setDetailTab('ai')}
+              className={`py-1.5 rounded-md transition-colors flex items-center justify-center space-x-1 ${
+                detailTab === 'ai' ? 'bg-purple-600 text-white' : 'text-gray-300 hover:text-white'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>AI Future Path</span>
+              {aiLoading && <span className="w-1.5 h-1.5 rounded-full bg-purple-300 animate-ping" />}
+            </button>
           </div>
 
-          {weatherLoading ? (
-            <p className="text-xs text-blue-300 animate-pulse">Loading live wind, water & sea telemetry...</p>
-          ) : liveWeather ? (
-            <div className="space-y-2.5 text-xs">
-              {/* Wind Speed Bar */}
-              <div>
-                <div className="flex justify-between mb-1">
-                  <span className="flex items-center space-x-1 text-gray-300">
-                    <Wind className="w-3.5 h-3.5 text-sky-400" />
-                    <span>Wind Speed</span>
-                  </span>
-                  <span className="font-semibold">
-                    {liveWeather.wind_speed_10m} km/h ({getWindStatus(liveWeather.wind_speed_10m).label})
-                  </span>
+          {detailTab === 'current' ? (
+            <>
+              <div className="grid grid-cols-2 gap-2 text-xs bg-white/5 rounded-lg p-2.5 mb-3">
+                <div>
+                  <span className="text-gray-400 block">Impact Zone</span>
+                  <span className="font-semibold text-white">{popupInfo.affected_radius_km} km radius</span>
                 </div>
-                <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full ${getWindStatus(liveWeather.wind_speed_10m).color}`}
-                    style={{ width: `${getWindStatus(liveWeather.wind_speed_10m).pct}%` }}
-                  />
+                <div>
+                  <span className="text-gray-400 block">Frequency (Active)</span>
+                  <span className="font-semibold text-white flex items-center space-x-1">
+                    <Gauge className="w-3.5 h-3.5 text-purple-400" />
+                    <span>{disasters.filter(d => d.type === popupInfo.type).length} {popupInfo.type}(s)</span>
+                  </span>
                 </div>
               </div>
 
-              {/* Water Level / Rainfall & River Flow Bar */}
-              <div>
-                <div className="flex justify-between mb-1">
-                  <span className="flex items-center space-x-1 text-gray-300">
-                    <Droplets className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Water / Rain Level</span>
-                  </span>
-                  <span className="font-semibold">
-                    {liveWeather.precipitation} mm
-                    {liveWeather.river_discharge !== null ? ` • Flow ${liveWeather.river_discharge.toFixed(1)} m³/s` : ''}
-                  </span>
-                </div>
-                <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full ${getWaterStatus(liveWeather.precipitation, liveWeather.river_discharge).color}`}
-                    style={{ width: `${getWaterStatus(liveWeather.precipitation, liveWeather.river_discharge).pct}%` }}
-                  />
-                </div>
-              </div>
+              {weatherLoading ? (
+                <p className="text-xs text-blue-300 animate-pulse">Loading live wind, water & sea telemetry...</p>
+              ) : liveWeather ? (
+                <div className="space-y-2.5 text-xs">
+                  <div>
+                    <div className="flex justify-between mb-1">
+                      <span className="flex items-center space-x-1 text-gray-300">
+                        <Wind className="w-3.5 h-3.5 text-sky-400" />
+                        <span>Wind Speed</span>
+                      </span>
+                      <span className="font-semibold">
+                        {liveWeather.wind_speed_10m} km/h ({getWindStatus(liveWeather.wind_speed_10m).label})
+                      </span>
+                    </div>
+                    <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${getWindStatus(liveWeather.wind_speed_10m).color}`}
+                        style={{ width: `${getWindStatus(liveWeather.wind_speed_10m).pct}%` }}
+                      />
+                    </div>
+                  </div>
 
-              {/* Sea Current & Wave Height */}
-              <div className="flex items-center justify-between bg-white/5 rounded-lg px-2.5 py-1.5">
-                <span className="flex items-center space-x-1 text-gray-300">
-                  <Waves className="w-3.5 h-3.5 text-teal-400" />
-                  <span>Sea Current / Waves</span>
-                </span>
-                <span className="font-semibold">
-                  {liveWeather.wave_height !== null || liveWeather.ocean_current_velocity !== null
-                    ? `${liveWeather.wave_height ?? 0} m waves • ${liveWeather.ocean_current_velocity ?? 0} m/s`
-                    : 'Inland Region'}
-                </span>
-              </div>
+                  <div>
+                    <div className="flex justify-between mb-1">
+                      <span className="flex items-center space-x-1 text-gray-300">
+                        <Droplets className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Water / Rain Level</span>
+                      </span>
+                      <span className="font-semibold">
+                        {liveWeather.precipitation} mm
+                        {liveWeather.river_discharge !== null ? ` • Flow ${liveWeather.river_discharge.toFixed(1)} m³/s` : ''}
+                      </span>
+                    </div>
+                    <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${getWaterStatus(liveWeather.precipitation, liveWeather.river_discharge).color}`}
+                        style={{ width: `${getWaterStatus(liveWeather.precipitation, liveWeather.river_discharge).pct}%` }}
+                      />
+                    </div>
+                  </div>
 
-              {/* Temperature & Humidity */}
-              <div className="flex items-center justify-between text-gray-300 pt-1">
-                <span className="flex items-center space-x-1">
-                  <Thermometer className="w-3.5 h-3.5 text-orange-400" />
-                  <span>Temp: <strong className="text-white">{liveWeather.temperature_2m}°C</strong></span>
-                </span>
-                <span>Humidity: <strong className="text-white">{liveWeather.relative_humidity_2m}%</strong></span>
-              </div>
-            </div>
+                  <div className="flex items-center justify-between bg-white/5 rounded-lg px-2.5 py-1.5">
+                    <span className="flex items-center space-x-1 text-gray-300">
+                      <Waves className="w-3.5 h-3.5 text-teal-400" />
+                      <span>Sea Current / Waves</span>
+                    </span>
+                    <span className="font-semibold">
+                      {liveWeather.wave_height !== null || liveWeather.ocean_current_velocity !== null
+                        ? `${liveWeather.wave_height ?? 0} m waves • ${liveWeather.ocean_current_velocity ?? 0} m/s`
+                        : 'Inland Region'}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between text-gray-300 pt-1">
+                    <span className="flex items-center space-x-1">
+                      <Thermometer className="w-3.5 h-3.5 text-orange-400" />
+                      <span>Temp: <strong className="text-white">{liveWeather.temperature_2m}°C</strong></span>
+                    </span>
+                    <span>Humidity: <strong className="text-white">{liveWeather.relative_humidity_2m}%</strong></span>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400">{popupInfo.description}</p>
+              )}
+            </>
           ) : (
-            <p className="text-xs text-gray-400">{popupInfo.description}</p>
+            <div className="space-y-3 text-xs">
+              {aiLoading ? (
+                <div className="py-6 text-center space-y-2">
+                  <Sparkles className="w-6 h-6 text-purple-400 animate-spin mx-auto" />
+                  <p className="text-purple-200">Gemini AI {popupInfo.type} route & future ETA predict kar raha hai...</p>
+                </div>
+              ) : aiError ? (
+                <div className="p-3 bg-red-500/20 border border-red-500/40 rounded-lg text-red-200">
+                  {aiError}
+                </div>
+              ) : aiForecast ? (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-purple-300 flex items-center space-x-1">
+                      <Navigation className="w-3.5 h-3.5" />
+                      <span>{aiForecast.typeSpecificLabel}</span>
+                    </span>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                      aiForecast.riskTrend === 'Escalating'
+                        ? 'bg-red-500/20 text-red-300'
+                        : aiForecast.riskTrend === 'Weakening'
+                        ? 'bg-emerald-500/20 text-emerald-300'
+                        : 'bg-amber-500/20 text-amber-300'
+                    }`}>
+                      {aiForecast.riskTrend} • {aiForecast.confidence}% conf.
+                    </span>
+                  </div>
+
+                  <p className="text-gray-200 leading-relaxed">{aiForecast.summary}</p>
+
+                  {aiForecast.keyMetrics.length > 0 && (
+                    <div className="grid grid-cols-2 gap-2">
+                      {aiForecast.keyMetrics.map((m, idx) => (
+                        <div key={idx} className="bg-white/5 rounded-lg p-2">
+                          <span className="text-gray-400 block text-[10px]">{m.label}</span>
+                          <span className="font-semibold text-white">{m.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {aiForecast.timeline.length > 0 && (
+                    <div className="space-y-1.5">
+                      <span className="text-[11px] font-semibold text-gray-300 flex items-center space-x-1">
+                        <Clock className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Predicted Route & ETA Timeline (Shown on Map)</span>
+                      </span>
+                      {aiForecast.timeline.map((wp, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => mapRef.current?.flyTo({ center: [wp.lng, wp.lat], zoom: 6, duration: 700 })}
+                          className="w-full text-left bg-white/5 hover:bg-purple-500/20 border border-white/10 rounded-lg px-2.5 py-2 transition-colors flex items-center justify-between"
+                        >
+                          <div>
+                            <span className="text-cyan-300 font-semibold">{wp.eta}</span>
+                            <span className="text-white ml-2">{wp.area}</span>
+                          </div>
+                          <span className="text-gray-300 text-[11px]">{wp.intensity}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="p-2.5 bg-amber-500/15 border border-amber-500/30 rounded-lg text-amber-200 text-[11px]">
+                    <strong>Safety Advice:</strong> {aiForecast.actionAdvice}
+                  </div>
+                </>
+              ) : null}
+            </div>
           )}
         </div>
       )}
@@ -541,7 +768,7 @@ export default function DisasterMap({ onDisasterSelect }: DisasterMapProps) {
         {...viewState}
         onMove={handleViewStateChange}
         style={{ width: '100%', height: '100%' }}
-        mapStyle={mapStyle}
+        mapStyle={MAP_STYLES.find(s => s.id === activeStyleId)?.style ?? MAP_STYLES[0].style}
         projection={{ name: 'mercator' }}
         mapboxAccessToken={MAPBOX_TOKEN}
         attributionControl={false}
@@ -626,6 +853,32 @@ export default function DisasterMap({ onDisasterSelect }: DisasterMapProps) {
           }}
         />
       </Source>
+
+      {/* AI Predicted Trajectory / Spread Path on Map */}
+      {predictedPathGeoJSON.features.length > 0 && (
+        <Source id="ai-predicted-path" type="geojson" data={predictedPathGeoJSON}>
+          <Layer
+            id="ai-predicted-path-line"
+            type="line"
+            paint={{
+              'line-color': '#c084fc',
+              'line-width': 3.5,
+              'line-dasharray': [2, 1.5],
+            }}
+          />
+        </Source>
+      )}
+
+      {aiForecast?.timeline.map((wp, idx) => (
+        <Marker key={`ai-wp-${idx}`} longitude={wp.lng} latitude={wp.lat}>
+          <div className="flex flex-col items-center pointer-events-none">
+            <div className="px-2 py-0.5 rounded-full bg-purple-600 text-white text-[10px] font-bold border border-white/60 shadow-lg whitespace-nowrap">
+              {wp.eta} • {wp.area}
+            </div>
+            <div className="w-2.5 h-2.5 rounded-full bg-cyan-300 border-2 border-purple-900 mt-0.5 shadow" />
+          </div>
+        </Marker>
+      ))}
 
       {renderDisasterMarkers()}
       {renderResourceMarkers()}

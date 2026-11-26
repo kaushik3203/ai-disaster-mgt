@@ -219,3 +219,136 @@ export async function generateSituationReport(data: {
   const response = await result.response;
   return response.text();
 }
+
+export interface ForecastWaypoint {
+  eta: string;
+  area: string;
+  lat: number;
+  lng: number;
+  intensity: string;
+}
+
+export interface DisasterAIForecast {
+  summary: string;
+  riskTrend: 'Escalating' | 'Stable' | 'Weakening';
+  confidence: number;
+  typeSpecificLabel: string;
+  timeline: ForecastWaypoint[];
+  keyMetrics: Array<{ label: string; value: string }>;
+  actionAdvice: string;
+}
+
+const forecastCache = new Map<string, DisasterAIForecast>();
+
+const TYPE_GUIDANCE: Record<string, string> = {
+  hurricane: 'Predict cyclone eye track waypoints (+6h, +12h, +24h, +48h), expected wind speed, landfall ETA, and coastal storm surge.',
+  tornado: 'Predict storm/cyclone movement track (+6h, +12h, +24h, +48h), wind gusts, affected districts/coasts, and landfall ETA.',
+  flood: 'Predict downstream flood expansion zones (+6h, +12h, +24h), water level rise, peak flood ETA, and low-lying areas at risk.',
+  earthquake: 'Predict aftershock probability, seismic zone checkpoints (+6h, +24h, +48h), tsunami potential if coastal, and structural risk.',
+  wildfire: 'Predict wind-driven fire spread direction & perimeter waypoints (+6h, +12h, +24h), smoke plume reach, and containment outlook.',
+  tsunami: 'Predict wave arrival waypoints (+1h, +3h, +6h), coastal surge height, and safe inland distance.',
+};
+
+export async function predictDisasterTrajectory(params: {
+  id: string;
+  type: Disaster['type'];
+  title: string;
+  locationName: string;
+  lat: number;
+  lng: number;
+  severity: number;
+  radiusKm: number;
+  description?: string | null;
+  weather?: {
+    temperature_2m: number;
+    wind_speed_10m: number;
+    precipitation: number;
+    relative_humidity_2m: number;
+    wave_height: number | null;
+    ocean_current_velocity: number | null;
+    river_discharge: number | null;
+  } | null;
+}): Promise<DisasterAIForecast> {
+  const cached = forecastCache.get(params.id);
+  if (cached) return cached;
+
+  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+  const guidance = TYPE_GUIDANCE[params.type] || TYPE_GUIDANCE.hurricane;
+
+  const weatherText = params.weather
+    ? `Wind: ${params.weather.wind_speed_10m} km/h, Rain: ${params.weather.precipitation} mm, Temp: ${params.weather.temperature_2m}C, Humidity: ${params.weather.relative_humidity_2m}%, River Flow: ${params.weather.river_discharge ?? 'N/A'} m3/s, Sea Wave: ${params.weather.wave_height ?? 'N/A'} m, Sea Current: ${params.weather.ocean_current_velocity ?? 'N/A'} m/s`
+    : 'Live weather unavailable; estimate from region and season.';
+
+  const prompt = `
+You are an emergency disaster forecasting AI. Analyze this active disaster and return ONLY valid JSON (no markdown fences, no extra text).
+
+Disaster:
+- Type: ${params.type}
+- Title: ${params.title}
+- Location: ${params.locationName} (lat: ${params.lat}, lng: ${params.lng})
+- Severity: ${params.severity}/5
+- Affected Radius: ${params.radiusKm} km
+- Description: ${params.description || 'N/A'}
+- Live Telemetry: ${weatherText}
+
+Task: ${guidance}
+Generate 3 to 4 realistic geographic waypoints starting near (${params.lat}, ${params.lng}) showing where this ${params.type} impact/track moves over the next hours (keep lat within +-5 deg and lng within +-5 deg of origin, valid coordinates). Use simple, non-technical language.
+
+Return exact JSON matching this schema:
+{
+  "summary": "2 short plain-English sentences explaining what will happen next",
+  "riskTrend": "Escalating" | "Stable" | "Weakening",
+  "confidence": 78,
+  "typeSpecificLabel": "e.g. Predicted Cyclone Track / Flood Expansion / Fire Spread / Aftershock Zone",
+  "timeline": [
+    { "eta": "+6 hrs", "area": "Nearby place/direction", "lat": 10.95, "lng": 76.35, "intensity": "e.g. 140 km/h winds" }
+  ],
+  "keyMetrics": [
+    { "label": "e.g. Landfall / Peak ETA", "value": "e.g. ~14 hours" },
+    { "label": "e.g. Expected Surge / Aftershock", "value": "e.g. 2.5m / High" }
+  ],
+  "actionAdvice": "1 short clear safety instruction for residents"
+}
+`;
+
+  const result = await model.generateContent(prompt);
+  const raw = result.response.text().trim();
+  const jsonText = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+  const parsed = JSON.parse(jsonText) as Partial<DisasterAIForecast>;
+
+  const validTimeline: ForecastWaypoint[] = Array.isArray(parsed.timeline)
+    ? parsed.timeline.filter(
+        (wp): wp is ForecastWaypoint =>
+          Boolean(wp) &&
+          typeof wp.eta === 'string' &&
+          typeof wp.area === 'string' &&
+          typeof wp.lat === 'number' &&
+          typeof wp.lng === 'number' &&
+          Number.isFinite(wp.lat) &&
+          Number.isFinite(wp.lng) &&
+          wp.lat >= -90 &&
+          wp.lat <= 90 &&
+          wp.lng >= -180 &&
+          wp.lng <= 180
+      )
+    : [];
+
+  const forecast: DisasterAIForecast = {
+    summary: parsed.summary || 'Monitoring disaster progression and nearby risk zones.',
+    riskTrend:
+      parsed.riskTrend === 'Escalating' || parsed.riskTrend === 'Weakening'
+        ? parsed.riskTrend
+        : 'Stable',
+    confidence:
+      typeof parsed.confidence === 'number' && Number.isFinite(parsed.confidence)
+        ? Math.max(10, Math.min(99, Math.round(parsed.confidence)))
+        : 75,
+    typeSpecificLabel: parsed.typeSpecificLabel || 'AI Predicted Path',
+    timeline: validTimeline,
+    keyMetrics: Array.isArray(parsed.keyMetrics) ? parsed.keyMetrics.slice(0, 4) : [],
+    actionAdvice: parsed.actionAdvice || 'Follow local emergency authority advisories.',
+  };
+
+  forecastCache.set(params.id, forecast);
+  return forecast;
+}

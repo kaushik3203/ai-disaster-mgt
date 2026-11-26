@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Map, Globe2, BarChart2, Users, Box, AlertTriangle, MessageSquare, Bot, Brain } from 'lucide-react';
+import { Map, Globe2, BarChart2, Users, Box, AlertTriangle, MessageSquare, Bot, Brain, X } from 'lucide-react';
 import AIChat from './AIChat';
 import { useDisasterStore } from '../store/disaster';
 
@@ -217,8 +217,15 @@ export default function Dock({ activeView, onViewChange }: DockProps) {
 
       {/* Other Panels */}
       {activePanel && (
-        <div className="fixed bottom-32 left-1/2 transform -translate-x-1/2 w-full max-w-2xl z-40">
-          <div className="glass rounded-xl shadow-xl max-h-[60vh] overflow-y-auto">
+        <div className="fixed bottom-32 left-1/2 transform -translate-x-1/2 w-full max-w-2xl px-4 z-40">
+          <div className="glass rounded-xl shadow-xl max-h-[60vh] overflow-y-auto relative">
+            <button
+              onClick={() => setActivePanel(null)}
+              className="absolute top-3 right-3 p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-gray-300 hover:text-white transition-colors"
+              aria-label="Close panel"
+            >
+              <X className="w-4 h-4" />
+            </button>
             {renderPanelContent(activePanel)}
           </div>
         </div>

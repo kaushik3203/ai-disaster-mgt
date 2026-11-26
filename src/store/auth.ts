@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 
 interface AuthState {
   user: User | null;
+  demoPhone: string | null;
   session: Session | null;
   loading: boolean;
   alertsEnabled: boolean;
@@ -11,6 +12,9 @@ interface AuthState {
   initializeAuth: () => () => void;
   sendPhoneOtp: (phone: string) => Promise<void>;
   verifyPhoneOtp: (phone: string, token: string) => Promise<void>;
+  sendEmailOtp: (email: string) => Promise<void>;
+  verifyEmailOtp: (email: string, token: string) => Promise<void>;
+  enableDemoPhoneAlerts: (phone: string) => Promise<void>;
   signOut: () => Promise<void>;
   toggleAlerts: (enabled: boolean) => Promise<void>;
   requestNotificationPermission: () => Promise<NotificationPermission | 'unsupported'>;
@@ -24,8 +28,8 @@ function getInitialPermission(): NotificationPermission | 'unsupported' {
 }
 
 export function notifyDeviceAlert(alert: { title: string; message: string; severity?: number | null }) {
-  const { user, alertsEnabled, notificationPermission } = useAuthStore.getState();
-  if (!user || !alertsEnabled) return;
+  const { user, demoPhone, alertsEnabled, notificationPermission } = useAuthStore.getState();
+  if ((!user && !demoPhone) || !alertsEnabled) return;
 
   if (notificationPermission === 'granted' && 'Notification' in window) {
     new Notification(`🚨 ${alert.title}`, {
@@ -38,6 +42,7 @@ export function notifyDeviceAlert(alert: { title: string; message: string; sever
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
+  demoPhone: null,
   session: null,
   loading: true,
   alertsEnabled: true,
@@ -71,16 +76,42 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     await get().requestNotificationPermission();
   },
 
+  sendEmailOtp: async (email: string) => {
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: window.location.origin,
+      },
+    });
+    if (error) throw error;
+  },
+
+  verifyEmailOtp: async (email: string, token: string) => {
+    const { data, error } = await supabase.auth.verifyOtp({
+      email,
+      token,
+      type: 'email',
+    });
+    if (error) throw error;
+    set({ session: data.session, user: data.user });
+    await get().requestNotificationPermission();
+  },
+
+  enableDemoPhoneAlerts: async (phone: string) => {
+    set({ demoPhone: phone, alertsEnabled: true });
+    await get().requestNotificationPermission();
+  },
+
   signOut: async () => {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
-    set({ session: null, user: null });
+    set({ session: null, user: null, demoPhone: null });
   },
 
   toggleAlerts: async (enabled: boolean) => {
     set({ alertsEnabled: enabled });
-    const { user } = get();
-    if (!user) return;
+    const { user, demoPhone } = get();
+    if (!user && !demoPhone) return;
     if (enabled) {
       await get().requestNotificationPermission();
     }

@@ -101,7 +101,7 @@ export default function AIChat({ onClose }: AIChatProps) {
     return (
       <button
         onClick={() => setIsMinimized(false)}
-        className="glass rounded-xl p-4 flex items-center space-x-3 hover:bg-white/5 transition-colors"
+        className="bg-slate-900/95 backdrop-blur-xl border border-white/15 shadow-2xl rounded-xl p-4 flex items-center space-x-3 hover:bg-slate-800/95 transition-colors"
       >
         <Bot className="w-6 h-6 text-blue-400" />
         <div className="flex-1">
@@ -116,7 +116,7 @@ export default function AIChat({ onClose }: AIChatProps) {
   return (
     <div 
       ref={chatRef}
-      className="glass rounded-xl overflow-hidden flex flex-col h-[600px] sm:h-[500px] md:h-[600px] w-full sm:max-w-md md:max-w-lg lg:max-w-xl"
+      className="bg-slate-900/95 backdrop-blur-xl border border-white/15 shadow-2xl rounded-xl overflow-hidden flex flex-col h-[600px] sm:h-[500px] md:h-[600px] w-full sm:max-w-md md:max-w-lg lg:max-w-xl"
     >
       <div className="p-4 border-b border-white/10 flex items-center justify-between">
         <div className="flex items-center space-x-3">
@@ -169,8 +169,8 @@ export default function AIChat({ onClose }: AIChatProps) {
             <div
               className={`max-w-[80%] rounded-lg p-3 ${
                 message.role === 'user'
-                  ? 'bg-blue-500/20 text-blue-100'
-                  : 'glass text-gray-200'
+                  ? 'bg-blue-600/30 border border-blue-500/30 text-blue-100'
+                  : 'bg-slate-800/90 border border-white/10 text-gray-100'
               }`}
             >
               <p className="whitespace-pre-line text-sm sm:text-base">{message.content}</p>
